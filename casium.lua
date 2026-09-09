@@ -7,8 +7,8 @@ local CONFIG = {
     WEBHOOK_EVERY = 300,          -- Seconds between webhook updates (0 = only start/finish)
 
     EVENT_CASE    = "SweetCase", -- Event case ID; auto-detected if this one is gone
-    EVENT_STOP    = 10000,        -- Stop opening event cases when event currency <= this
-    PIQRU_STOP    = 200000,       -- Stop opening Piqru when Balance <= this
+    EVENT_STOP    = 50,        -- Stop opening event cases when event currency <= this
+    PIQRU_STOP    = 2000000000,       -- Stop opening Piqru when Balance <= this
 
     BUY_DELAY     = 6.0,          -- Server accepts one open per ~5.8s (measured live)
     BACKOFF_DELAY = 1.0,          -- Wait after a rejected open
