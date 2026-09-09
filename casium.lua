@@ -3,12 +3,12 @@
 -- Case opening + auto sell + Discord webhook. Nothing else.
 -- ====================================================================================================
 local CONFIG = {
-    WEBHOOK_URL   = "https://discord.com/api/webhooks/1482520113440755732/rcin7A70aRm-Mr8Vgtl90O1WDQJmi0Uc5IcTqSEbzpFNt4vcfRFAN2ZEd-s_tQBHh8VG",
+    WEBHOOK_URL   = "https://discord.com/api/webhooks/1530628648888041553/yUVjHpL9SHcEukSfveiQUfsJSEjPViw64ssTOlrdRRdiJvy7JvCx1G2jGMwbP46To1CK",
     WEBHOOK_EVERY = 300,          -- Seconds between webhook updates (0 = only start/finish)
 
-    EVENT_CASE    = "CandyCase",  -- Event case ID; auto-detected if this one is gone
-    EVENT_STOP    = 50,        -- Stop opening event cases when event currency <= this
-    PIQRU_STOP    = 10000000,       -- Stop opening Piqru when Balance <= this
+    EVENT_CASE    = "SweetCase", -- Event case ID; auto-detected if this one is gone
+    EVENT_STOP    = 10000,        -- Stop opening event cases when event currency <= this
+    PIQRU_STOP    = 200000,       -- Stop opening Piqru when Balance <= this
 
     BUY_DELAY     = 6.0,          -- Server accepts one open per ~5.8s (measured live)
     BACKOFF_DELAY = 1.0,          -- Wait after a rejected open
