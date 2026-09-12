@@ -36,6 +36,18 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService       = game:GetService("HttpService")
 local LocalPlayer       = Players.LocalPlayer or Players.PlayerAdded:Wait()
 
+-- ---------------------------------------------------------------------------------------------------
+-- Anti-AFK
+-- ---------------------------------------------------------------------------------------------------
+local VirtualUser = game:GetService("VirtualUser")
+
+LocalPlayer.Idled:Connect(function()
+    VirtualUser:CaptureController()
+    VirtualUser:ClickButton2(Vector2.new())
+end)
+
+print("[Anti-AFK] Enabled")
+
 local Remotes    = ReplicatedStorage:WaitForChild("Remotes")
 local OpenCase   = Remotes:WaitForChild("OpenCase")
 local SellRemote = Remotes:WaitForChild("Sell")
