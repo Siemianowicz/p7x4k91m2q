@@ -6,9 +6,9 @@ local CONFIG = {
     WEBHOOK_URL   = "https://discord.com/api/webhooks/1530628648888041553/yUVjHpL9SHcEukSfveiQUfsJSEjPViw64ssTOlrdRRdiJvy7JvCx1G2jGMwbP46To1CK",
     WEBHOOK_EVERY = 300,          -- Seconds between webhook updates (0 = only start/finish)
 
-    EVENT_CASE    = "SweetCase", -- Event case ID; auto-detected if this one is gone
+    EVENT_CASE    = "AutumnCase", -- Event case ID (currency "Leaves", billed from Tickets); auto-detected if gone
     EVENT_STOP    = 50,        -- Stop opening event cases when event currency <= this
-    PIQRU_STOP    = 2000000000,       -- Stop opening Piqru when Balance <= this
+    PIQRU_STOP    = 200000000,       -- Stop opening Piqru when Balance <= this
 
     BUY_DELAY     = 6.0,          -- Server accepts one open per ~5.8s (measured live)
     BACKOFF_DELAY = 1.0,          -- Wait after a rejected open
@@ -23,6 +23,14 @@ local CONFIG = {
     KEEP_PATTERNS  = {            -- NEVER sell an item whose ID contains any of these, at any value
         "holo",
         "titan",
+        "kato",       -- Katowice tournament items
+        "dreamhack",
+        "krakow",
+    },
+    KEEP_RARITIES  = {            -- NEVER sell an item at any of these rarities, regardless of value.
+        Special       = true,     -- event knives, gloves, holos
+        Extraordinary = true,     -- knives (highest rarity in normal cases)
+        Contraband    = true,     -- the two contraband items in the module
     },
 }
 
@@ -35,18 +43,6 @@ local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService       = game:GetService("HttpService")
 local LocalPlayer       = Players.LocalPlayer or Players.PlayerAdded:Wait()
-
--- ---------------------------------------------------------------------------------------------------
--- Anti-AFK
--- ---------------------------------------------------------------------------------------------------
-local VirtualUser = game:GetService("VirtualUser")
-
-LocalPlayer.Idled:Connect(function()
-    VirtualUser:CaptureController()
-    VirtualUser:ClickButton2(Vector2.new())
-end)
-
-print("[Anti-AFK] Enabled")
 
 local Remotes    = ReplicatedStorage:WaitForChild("Remotes")
 local OpenCase   = Remotes:WaitForChild("OpenCase")
@@ -75,6 +71,28 @@ local function fmt(n)
 end
 
 local totalSold, totalSoldValue = 0, 0
+
+-- ---------------------------------------------------------------------------------------------------
+-- Anti-AFK: intercept the 20-minute idle disconnect. Rebinds on each launch so hop/rejoin does not
+-- leave a stale handler pointing at the old LocalPlayer.
+-- ---------------------------------------------------------------------------------------------------
+do
+    local ok, VU = pcall(function() return game:GetService("VirtualUser") end)
+    if ok and VU then
+        if getgenv()._CaseMinAntiAfk then
+            pcall(function() getgenv()._CaseMinAntiAfk:Disconnect() end)
+        end
+        pcall(function()
+            getgenv()._CaseMinAntiAfk = LocalPlayer.Idled:Connect(function()
+                pcall(function()
+                    VU:CaptureController()
+                    VU:ClickButton2(Vector2.new())
+                end)
+            end)
+            print("[AFK] Anti-AFK armed")
+        end)
+    end
+end
 
 -- ---------------------------------------------------------------------------------------------------
 -- Resolve the event case (auto-detects if the configured ID has been removed)
@@ -156,6 +174,12 @@ local function isProtected(id)
     local low = id:lower()
     for _, pat in ipairs(CONFIG.KEEP_PATTERNS) do
         if low:find(pat:lower(), 1, true) then return true end
+    end
+    -- Rarity-based protection: an event knife or Special holo never has "titan" in its ID,
+    -- so name patterns alone miss items like ButterflyKnife_DemonHound (Special, 55k).
+    if Items and CONFIG.KEEP_RARITIES then
+        local d = Items[id]
+        if d and d.Rarity and CONFIG.KEEP_RARITIES[d.Rarity] then return true end
     end
     return false
 end
