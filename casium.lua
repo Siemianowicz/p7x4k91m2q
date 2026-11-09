@@ -12,7 +12,7 @@ local CONFIG = {
     -- "farm"  = sends titans to the stocking account
     -- "stock" = receives titans, counts them, auto-accepts incoming, enforces the 200 cap
     ROLE           = "farm",
-    STOCK_USERNAME = "",            -- << CHANGE THIS to the stocking account's Roblox username (case-insensitive)
+    STOCK_USERNAME = "enforcer1111",            -- << CHANGE THIS to the stocking account's Roblox username (case-insensitive)
 
     -- Drain (no stops) ----------------------------------------------------------------------------
     EVENT_CASE    = "CyberCase",    -- current rotation (CyberCase/HalloweenCase @ 10 CPU); auto-resolved if gone
