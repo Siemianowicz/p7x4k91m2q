@@ -1,392 +1,165 @@
 
--- CASE PARADISE AUTO PANEL
--- Rewards + Giveaway + Scanner
--- Game: 136751105840706
+-- PLAYTIME REWARDS DEBUG SCANNER
+-- Niczego nie odbiera ani nie klika
 
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui")
+local pg = player:WaitForChild("PlayerGui")
 
-local env = getgenv and getgenv() or _G
+local old = pg:FindFirstChild("PlaytimeDebugGUI")
+if old then old:Destroy() end
 
--- Usun poprzedni panel
-if env.CaserAutoPanelStop then
-    env.CaserAutoPanelStop()
+local lines = {}
+
+local function add(s)
+    table.insert(lines, tostring(s))
 end
 
-local running = true
-local rewardsON = false
-local giveawayON = false
-local rewardAttempts = 0
-local giveawayAttempts = 0
-local logs = {}
-local lastActions = {}
-
-local function log(message)
-    local line = os.date("%H:%M:%S") .. " " .. message
-    table.insert(logs, line)
-    if #logs > 300 then
-        table.remove(logs, 1)
-    end
-    print("[CASER] " .. line)
-end
-
-local function path(obj)
-    local ok, value = pcall(function()
-        return obj:GetFullName()
-    end)
-    return ok and value or "UNKNOWN"
-end
-
-local function contains(str, word)
-    return string.find(
-        string.lower(str), word, 1, true
-    ) ~= nil
-end
-
-local function visible(obj)
-    local current = obj
-    while current and current ~= playerGui do
-        if current:IsA("GuiObject")
-            and not current.Visible then
-            return false
-        end
-        current = current.Parent
-    end
-    return true
-end
-
-local function activate(button)
-    if type(getconnections) ~= "function" then
-        return false
-    end
-
-    local ok, count = pcall(function()
-        local fired = 0
-
-        for _, signal in ipairs({
-            button.MouseButton1Click,
-            button.Activated
-        }) do
-            for _, connection in ipairs(
-                getconnections(signal)
-            ) do
-                if connection.Function then
-                    connection:Fire()
-                    fired += 1
-                end
-            end
-        end
-
-        return fired
-    end)
-
-    return ok and count > 0
-end
-
--- GUI
-local gui = Instance.new("ScreenGui")
-gui.Name = "CaserAutoPanel"
-gui.ResetOnSpawn = false
-
-local success = pcall(function()
-    gui.Parent = game:GetService("CoreGui")
-end)
-
-if not success or not gui.Parent then
-    gui.Parent = playerGui
-end
-
-local main = Instance.new("Frame")
-main.Size = UDim2.fromOffset(290, 310)
-main.Position = UDim2.new(0.5, -145, 0.3, 0)
-main.BackgroundColor3 = Color3.fromRGB(24, 27, 36)
-main.Active = true
-main.Draggable = true
-main.Parent = gui
-
-Instance.new("UICorner", main).CornerRadius =
-    UDim.new(0, 12)
-
-local function makeButton(name, y, height, color)
-    local b = Instance.new("TextButton")
-    b.Size = UDim2.new(1, -20, 0, height)
-    b.Position = UDim2.fromOffset(10, y)
-    b.BackgroundColor3 = color
-    b.TextColor3 = Color3.new(1, 1, 1)
-    b.TextSize = 14
-    b.Font = Enum.Font.GothamBold
-    b.Text = name
-    b.Parent = main
-
-    Instance.new("UICorner", b).CornerRadius =
-        UDim.new(0, 7)
-
-    return b
-end
-
-local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, -20, 0, 35)
-title.Position = UDim2.fromOffset(10, 5)
-title.BackgroundTransparency = 1
-title.Text = "CASE PARADISE AUTO"
-title.TextColor3 = Color3.new(1, 1, 1)
-title.TextSize = 17
-title.Font = Enum.Font.GothamBold
-title.Parent = main
-
-local rewardsButton = makeButton(
-    "AUTO REWARDS: OFF",
-    45, 38,
-    Color3.fromRGB(145, 45, 55)
-)
-
-local giveawayButton = makeButton(
-    "AUTO GIVEAWAY: OFF",
-    90, 38,
-    Color3.fromRGB(145, 45, 55)
-)
-
-local status = Instance.new("TextLabel")
-status.Size = UDim2.new(1, -20, 0, 58)
-status.Position = UDim2.fromOffset(10, 133)
-status.BackgroundTransparency = 1
-status.TextColor3 = Color3.fromRGB(210, 210, 220)
-status.TextSize = 12
-status.Font = Enum.Font.Code
-status.TextWrapped = true
-status.Parent = main
-
-local scanButton = makeButton(
-    "SCAN GIVEAWAY",
-    195, 31,
-    Color3.fromRGB(50, 90, 160)
-)
-
-local copyButton = makeButton(
-    "COPY LOGS",
-    232, 31,
-    Color3.fromRGB(40, 140, 95)
-)
-
-local closeButton = makeButton(
-    "STOP / CLOSE",
-    269, 31,
-    Color3.fromRGB(110, 55, 60)
-)
-
-local function refresh()
-    rewardsButton.Text =
-        "AUTO REWARDS: " .. (rewardsON and "ON" or "OFF")
-
-    giveawayButton.Text =
-        "AUTO GIVEAWAY: " .. (giveawayON and "ON" or "OFF")
-
-    rewardsButton.BackgroundColor3 = rewardsON
-        and Color3.fromRGB(35, 140, 85)
-        or Color3.fromRGB(145, 45, 55)
-
-    giveawayButton.BackgroundColor3 = giveawayON
-        and Color3.fromRGB(35, 140, 85)
-        or Color3.fromRGB(145, 45, 55)
-
-    status.Text = string.format(
-        "Reward attempts: %d\n" ..
-        "Giveaway attempts: %d\n" ..
-        "Last: %s",
-        rewardAttempts,
-        giveawayAttempts,
-        lastActions.message or "Waiting..."
-    )
-end
-
-local function setLast(message)
-    lastActions.message = message
-    refresh()
-end
-
--- PLAYTIME REWARDS
-local function checkRewards()
-    local root = playerGui:FindFirstChild("CaserUpgrader")
-    if not root then return end
-
-    for i = 1, 3 do
-        local buttonName = "PlayClaim" .. i
-
-        for _, obj in ipairs(root:GetDescendants()) do
-            if obj.Name == buttonName
-                and obj:IsA("GuiButton") then
-
-                local label = obj:IsA("TextButton")
-                    and string.upper(obj.Text) or ""
-
-                if contains(label, "CLAIM")
-                    and not contains(label, "CLAIMED")
-                    and not contains(label, "KEEP") then
-
-                    local key = "reward" .. i
-                    local now = os.clock()
-
-                    if now - (lastActions[key] or -100) >= 15 then
-                        lastActions[key] = now
-                        rewardAttempts += 1
-
-                        local ok = activate(obj)
-
-                        log("Reward " .. i ..
-                            " attempt=" .. tostring(ok))
-                        setLast("Reward " .. i)
-                    end
-                end
-            end
-        end
-    end
-end
-
--- GIVEAWAY
-local function isGiveawayContext(obj)
-    local current = obj.Parent
-    while current and current ~= playerGui do
-        local name = string.lower(current.Name)
-
-        if contains(name, "giveaway")
-            or contains(name, "notice_join") then
-            return true
-        end
-
-        current = current.Parent
-    end
-
-    return contains(obj.Name, "giveaway")
-end
-
-local function checkGiveaways()
-    local root = playerGui:FindFirstChild("CaserUpgrader")
-    if not root then return end
-
-    for _, obj in ipairs(root:GetDescendants()) do
-        if obj:IsA("TextButton") and visible(obj) then
-            local label = string.upper(obj.Text)
-
-            if (label == "JOIN"
-                or label == "JOIN GIVEAWAY"
-                or label == "ENTER GIVEAWAY")
-                and isGiveawayContext(obj) then
-
-                local key = path(obj)
-                local now = os.clock()
-
-                if now - (lastActions[key] or -100) >= 30 then
-                    lastActions[key] = now
-                    giveawayAttempts += 1
-
-                    local ok = activate(obj)
-
-                    log("Giveaway JOIN: " .. key)
-                    log("Attempt=" .. tostring(ok))
-                    setLast("Giveaway join attempt")
-                end
-            end
-        end
-    end
-end
-
--- DETAILED SCANNER
-local function scanGiveaway()
-    log("===== GIVEAWAY SCAN =====")
-    log("PlaceId: " .. game.PlaceId)
-
-    local root = playerGui:FindFirstChild("CaserUpgrader")
-
-    if not root then
-        log("CaserUpgrader not found")
+local function describe(obj)
+    if not obj then
+        add("OBJECT NOT FOUND")
         return
     end
 
-    for _, obj in ipairs(root:GetDescendants()) do
-        local relevant =
-            contains(obj.Name, "giveaway")
-            or contains(obj.Name, "join")
-            or contains(obj.Name, "notice")
-            or contains(obj.Name, "enter")
+    add("Path: " .. obj:GetFullName())
+    add("Class: " .. obj.ClassName)
 
-        if obj:IsA("TextButton") then
-            local label = string.upper(obj.Text)
-            if contains(label, "JOIN")
-                or contains(label, "ENTER")
-                or contains(label, "GIVEAWAY") then
-                relevant = true
-            end
-        end
-
-        if relevant then
-            log("[" .. obj.ClassName .. "] " .. path(obj))
-
-            if obj:IsA("TextButton") then
-                log("TEXT: " .. obj.Text)
-                log("VISIBLE: " .. tostring(visible(obj)))
-            end
-        end
+    if obj:IsA("GuiObject") then
+        add("Visible: " .. tostring(obj.Visible))
+        add("Active: " .. tostring(obj.Active))
+        add("Position: " .. tostring(obj.Position))
+        add("Size: " .. tostring(obj.Size))
+        add("AbsoluteSize: " .. tostring(obj.AbsoluteSize))
     end
 
-    log("===== END SCAN =====")
+    if obj:IsA("GuiButton") then
+        add("Interactable: " .. tostring(obj.Interactable))
+        add("Selectable: " .. tostring(obj.Selectable))
+    end
+
+    if obj:IsA("TextButton")
+        or obj:IsA("TextLabel") then
+        add("Text: " .. obj.Text)
+    end
+
+    for _, child in ipairs(obj:GetChildren()) do
+        add("  Child: " .. child.Name ..
+            " [" .. child.ClassName .. "]")
+
+        if child:IsA("TextLabel")
+            or child:IsA("TextButton") then
+            add("    Text: " .. child.Text)
+        end
+    end
 end
 
-rewardsButton.MouseButton1Click:Connect(function()
-    rewardsON = not rewardsON
-    log("Rewards: " .. tostring(rewardsON))
-    refresh()
+local function scan()
+    table.clear(lines)
+    add("=== PLAYTIME DEBUG ===")
+    add("PlaceId: " .. game.PlaceId)
+
+    local root = pg:FindFirstChild("CaserUpgrader")
+
+    if not root then
+        add("CaserUpgrader NOT FOUND")
+        return
+    end
+
+    for i = 1, 3 do
+        add("")
+        add("===== REWARD " .. i .. " =====")
+
+        local found = false
+
+        for _, obj in ipairs(root:GetDescendants()) do
+            if obj.Name == "PlayClaim" .. i then
+                found = true
+                describe(obj)
+                add("--- PARENT ---")
+                describe(obj.Parent)
+            end
+        end
+
+        if not found then
+            add("BUTTON NOT FOUND")
+        end
+    end
+end
+
+scan()
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "PlaytimeDebugGUI"
+gui.ResetOnSpawn = false
+gui.Parent = pg
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0.85, 0, 0.65, 0)
+frame.Position = UDim2.new(0.075, 0, 0.17, 0)
+frame.BackgroundColor3 = Color3.fromRGB(25, 28, 36)
+frame.Active = true
+frame.Draggable = true
+frame.Parent = gui
+
+Instance.new("UICorner", frame).CornerRadius =
+    UDim.new(0, 10)
+
+local output = Instance.new("TextBox")
+output.Size = UDim2.new(1, -20, 1, -110)
+output.Position = UDim2.fromOffset(10, 10)
+output.BackgroundColor3 = Color3.fromRGB(35, 38, 48)
+output.TextColor3 = Color3.new(1, 1, 1)
+output.Font = Enum.Font.Code
+output.TextSize = 12
+output.MultiLine = true
+output.TextWrapped = false
+output.TextXAlignment = Enum.TextXAlignment.Left
+output.TextYAlignment = Enum.TextYAlignment.Top
+output.ClearTextOnFocus = false
+output.TextEditable = true
+output.Text = table.concat(lines, "\n")
+output.Parent = frame
+
+local function button(text, x, width, color)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(width, -10, 0, 40)
+    b.Position = UDim2.new(x, 5, 1, -50)
+    b.BackgroundColor3 = color
+    b.TextColor3 = Color3.new(1, 1, 1)
+    b.Text = text
+    b.TextSize = 13
+    b.Parent = frame
+    return b
+end
+
+local refresh = button(
+    "REFRESH", 0, 0.33,
+    Color3.fromRGB(50, 100, 170)
+)
+
+local copy = button(
+    "COPY LOGS", 0.33, 0.34,
+    Color3.fromRGB(35, 140, 85)
+)
+
+local close = button(
+    "CLOSE", 0.67, 0.33,
+    Color3.fromRGB(160, 55, 55)
+)
+
+refresh.MouseButton1Click:Connect(function()
+    scan()
+    output.Text = table.concat(lines, "\n")
 end)
 
-giveawayButton.MouseButton1Click:Connect(function()
-    giveawayON = not giveawayON
-    log("Giveaway: " .. tostring(giveawayON))
-    refresh()
-end)
-
-scanButton.MouseButton1Click:Connect(function()
-    scanGiveaway()
-    setLast("Scan completed")
-end)
-
-copyButton.MouseButton1Click:Connect(function()
-    local content = table.concat(logs, "\n")
-
-    local clipboard = setclipboard or toclipboard
-
-    if type(clipboard) == "function" then
-        clipboard(content)
-        copyButton.Text = "COPIED!"
-    else
-        copyButton.Text = "Clipboard unsupported"
+copy.MouseButton1Click:Connect(function()
+    local fn = setclipboard or toclipboard
+    if fn then
+        fn(output.Text)
+        copy.Text = "COPIED!"
     end
 end)
 
-local function stop()
-    running = false
-    rewardsON = false
-    giveawayON = false
+close.MouseButton1Click:Connect(function()
     gui:Destroy()
-end
-
-env.CaserAutoPanelStop = stop
-
-closeButton.MouseButton1Click:Connect(stop)
-
-task.spawn(function()
-    while running do
-        if rewardsON then
-            pcall(checkRewards)
-        end
-
-        if giveawayON then
-            pcall(checkGiveaways)
-        end
-
-        refresh()
-        task.wait(5)
-    end
 end)
-
-log("Panel started")
-refresh()
