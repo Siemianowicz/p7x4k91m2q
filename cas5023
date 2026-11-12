@@ -169,16 +169,16 @@ local function findGiveawayButtons()
     if not root then return found end
 
     for _, obj in ipairs(root:GetDescendants()) do
-        if obj:IsA("GuiButton")
+        if obj:IsA("TextButton")
             and isVisible(obj)
-            and giveawayContext(obj) then
+            and obj.Interactable then
 
-            local label = obj:IsA("TextButton")
-                and upper(obj.Text) or ""
+            local label = upper(obj.Text)
 
-            if label == "JOIN"
-                or label == "JOIN GIVEAWAY"
+            if label == "JOIN GIVEAWAY"
+                or label == "JOIN"
                 or label == "ENTER GIVEAWAY" then
+
                 table.insert(found, obj)
             end
         end
@@ -186,6 +186,7 @@ local function findGiveawayButtons()
 
     return found
 end
+
 
 local function checkGiveaways()
     for _, button in ipairs(findGiveawayButtons()) do
