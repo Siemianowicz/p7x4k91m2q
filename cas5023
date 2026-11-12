@@ -430,32 +430,106 @@ end
 env.CaserV3Stop = stop
 closeButton.Activated:Connect(stop)
 
+
+-- CASE PARADISE V4
+-- Automatyczna zmiana zakladek co 180 sekund
+
+local CYCLE_SECONDS = 180
+
+local function findTab(tabName)
+    local root = getRoot()
+    if not root then return nil end
+
+    local outer = root:FindFirstChild("Frame")
+    local top = outer and outer:FindFirstChild("Frame")
+    if not top then return nil end
+
+    for _, obj in ipairs(top:GetChildren()) do
+        if obj:IsA("TextButton") then
+
+            if tabName == "REWARDS"
+                and upper(obj.Text) == "REWARDS" then
+                return obj
+            end
+
+            if tabName == "GIVEAWAY" then
+                for _, child in ipairs(obj:GetDescendants()) do
+                    if child.Name == "Artwork_giveawayGift" then
+                        return obj
+                    end
+                end
+            end
+        end
+    end
+
+    return nil
+end
+
+local function openTab(name)
+    local button = findTab(name)
+
+    if not button then
+        log("TAB NOT FOUND: " .. name)
+        return false
+    end
+
+    local ok, detail = clickButton(button)
+
+    log("OPEN " .. name .. ": " ..
+        tostring(ok) .. " (" .. tostring(detail) .. ")")
+
+    if ok then
+        task.wait(2)
+    end
+
+    return ok
+end
+
 task.spawn(function()
+    log("V4 cycle enabled: 180 seconds")
+
     while alive do
         if not busy then
             busy = true
 
+            -- REWARDS
             if rewardsON then
-                local ok, err = pcall(checkRewards)
+                local ok, err = pcall(function()
+                    if openTab("REWARDS") then
+                        checkRewards()
+                    end
+                end)
+
                 if not ok then
                     log("REWARDS ERROR: " .. tostring(err))
                 end
             end
 
+            -- GIVEAWAY
             if giveawayON then
-                local ok, err = pcall(checkGiveaways)
+                local ok, err = pcall(function()
+                    if openTab("GIVEAWAY") then
+                        checkGiveaways()
+                    end
+                end)
+
                 if not ok then
                     log("GIVEAWAY ERROR: " .. tostring(err))
                 end
             end
 
             busy = false
+            refresh()
         end
 
-        refresh()
-        task.wait(5)
+        -- Oczekiwanie 3 minuty
+        for i = 1, CYCLE_SECONDS do
+            if not alive then break end
+            task.wait(1)
+        end
     end
 end)
+
 
 log("V3 started")
 refresh()
