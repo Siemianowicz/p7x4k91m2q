@@ -1,54 +1,452 @@
 
--- TEST CLAIM REWARD 1
--- Delta Executor
+-- CASE PARADISE AUTO V3
+-- Rewards / Giveaway / Debug
+-- PlaceId: 136751105840706
 
 local Players = game:GetService("Players")
-local pg = Players.LocalPlayer:WaitForChild("PlayerGui")
+local UIS = game:GetService("UserInputService")
+local player = Players.LocalPlayer
+local pg = player:WaitForChild("PlayerGui")
+local env = getgenv and getgenv() or _G
 
-local button = pg
-    :WaitForChild("CaserUpgrader")
-    :WaitForChild("Frame")
-    :WaitForChild("ScrollingFrame")
-    :WaitForChild("Frame")
-    :WaitForChild("Playtime1")
-    :WaitForChild("PlayClaim1")
-
-print("[TEST] Button:", button.Text)
-
-if button.Text ~= "CLAIM SKIN" then
-    warn("[TEST] Reward not ready")
-    return
+-- Stop previous version
+if type(env.CaserV3Stop) == "function" then
+    pcall(env.CaserV3Stop)
 end
 
-if type(getconnections) ~= "function" then
-    warn("[TEST] getconnections unavailable")
-    return
+local alive = true
+local rewardsON = false
+local giveawayON = false
+local rewardAttempts = 0
+local giveawayAttempts = 0
+local logs = {}
+local lastTry = {}
+local lastMessage = "Ready"
+local busy = false
+
+local function log(msg)
+    local line = os.date("%H:%M:%S") .. " " .. tostring(msg)
+    table.insert(logs, line)
+    if #logs > 200 then table.remove(logs, 1) end
+    lastMessage = tostring(msg)
+    print("[CASER V3] " .. line)
 end
 
-local ok, connections = pcall(function()
-    return getconnections(button.MouseButton1Click)
-end)
-
-if not ok then
-    warn("[TEST] Cannot inspect connections")
-    return
+local function upper(s)
+    return string.upper(tostring(s or ""))
 end
 
-print("[TEST] Connections:", #connections)
+local function has(s, word)
+    return string.find(upper(s), word, 1, true) ~= nil
+end
 
-local fired = 0
+local function getRoot()
+    return pg:FindFirstChild("CaserUpgrader")
+end
 
-for _, connection in ipairs(connections) do
-    local success, err = pcall(function()
-        connection:Fire()
-    end)
+local function isVisible(obj)
+    local current = obj
 
-    if success then
-        fired += 1
-        print("[TEST] Fired connection")
-    else
-        warn("[TEST] Error:", err)
+    while current and current ~= pg do
+        if current:IsA("GuiObject") and not current.Visible then
+            return false
+        end
+        current = current.Parent
+    end
+
+    return true
+end
+
+local function getRewardButton(i)
+    local root = getRoot()
+    if not root then return nil end
+
+    for _, obj in ipairs(root:GetDescendants()) do
+        if obj.Name == "PlayClaim" .. i
+            and obj:IsA("GuiButton") then
+            return obj
+        end
     end
 end
 
-print("[TEST] Fired:", fired)
+local function canTry(key, delay)
+    local now = os.clock()
+    if now - (lastTry[key] or -9999) < delay then
+        return false
+    end
+    lastTry[key] = now
+    return true
+end
+
+-- Attempt client-side button activation.
+-- This does not confirm server acceptance.
+local function clickButton(button)
+    local errors = {}
+
+    if type(getconnections) == "function" then
+        local ok, count = pcall(function()
+            local fired = 0
+            local signals = {
+                button.Activated,
+                button.MouseButton1Click
+            }
+
+            for _, signal in ipairs(signals) do
+                for _, conn in ipairs(getconnections(signal)) do
+                    local success = pcall(function()
+                        conn:Fire()
+                    end)
+                    if success then
+                        fired += 1
+                    end
+                end
+            end
+
+            return fired
+        end)
+
+        if ok and count > 0 then
+            return true, "connections=" .. count
+        end
+
+        table.insert(errors, "connections unavailable/empty")
+    end
+
+    local ok, err = pcall(function()
+        button:Activate()
+    end)
+
+    if ok then
+        return true, "Activate called"
+    end
+
+    table.insert(errors, tostring(err))
+    return false, table.concat(errors, "; ")
+end
+
+local function checkRewards()
+    for i = 1, 3 do
+        local button = getRewardButton(i)
+
+        if button then
+            local label = upper(button:IsA("TextButton")
+                and button.Text or "")
+
+            local ready = has(label, "CLAIM")
+                and not has(label, "CLAIMED")
+                and not has(label, "KEEP PLAYING")
+
+            if ready and canTry("reward" .. i, 20) then
+                rewardAttempts += 1
+
+                local ok, detail = clickButton(button)
+                log("Reward " .. i .. ": " ..
+                    (ok and "attempt sent" or "FAILED") ..
+                    " (" .. detail .. ")")
+            end
+        end
+    end
+end
+
+local function giveawayContext(button)
+    local current = button.Parent
+
+    while current and current ~= pg do
+        local n = upper(current.Name)
+        if has(n, "GIVEAWAY")
+            or has(n, "NOTICE_JOIN") then
+            return true
+        end
+        current = current.Parent
+    end
+
+    return has(button.Name, "GIVEAWAY")
+end
+
+local function findGiveawayButtons()
+    local root = getRoot()
+    local found = {}
+    if not root then return found end
+
+    for _, obj in ipairs(root:GetDescendants()) do
+        if obj:IsA("GuiButton")
+            and isVisible(obj)
+            and giveawayContext(obj) then
+
+            local label = obj:IsA("TextButton")
+                and upper(obj.Text) or ""
+
+            if label == "JOIN"
+                or label == "JOIN GIVEAWAY"
+                or label == "ENTER GIVEAWAY" then
+                table.insert(found, obj)
+            end
+        end
+    end
+
+    return found
+end
+
+local function checkGiveaways()
+    for _, button in ipairs(findGiveawayButtons()) do
+        local key = button:GetFullName()
+
+        if canTry(key, 60) then
+            giveawayAttempts += 1
+            local ok, detail = clickButton(button)
+
+            log("Giveaway: " ..
+                (ok and "attempt sent" or "FAILED") ..
+                " (" .. detail .. ")")
+        end
+    end
+end
+
+-- GUI
+for _, parent in ipairs({pg, game:GetService("CoreGui")}) do
+    local old = parent:FindFirstChild("CaserAutoV3")
+    if old then old:Destroy() end
+end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "CaserAutoV3"
+gui.ResetOnSpawn = false
+gui.DisplayOrder = 2147483647
+gui.IgnoreGuiInset = true
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+gui.Parent = pg
+
+local main = Instance.new("Frame")
+main.Size = UDim2.fromOffset(300, 330)
+main.Position = UDim2.new(0.5, -150, 0.5, -165)
+main.BackgroundColor3 = Color3.fromRGB(25, 28, 38)
+main.Active = true
+main.Parent = gui
+
+Instance.new("UICorner", main).CornerRadius =
+    UDim.new(0, 12)
+
+local function makeButton(txt, y, h, color)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -20, 0, h)
+    b.Position = UDim2.fromOffset(10, y)
+    b.BackgroundColor3 = color
+    b.TextColor3 = Color3.new(1, 1, 1)
+    b.TextSize = 13
+    b.Font = Enum.Font.GothamBold
+    b.Text = txt
+    b.Parent = main
+
+    Instance.new("UICorner", b).CornerRadius =
+        UDim.new(0, 7)
+
+    return b
+end
+
+local header = makeButton(
+    "CASE PARADISE AUTO V3  -  DRAG",
+    5, 35, Color3.fromRGB(48, 60, 83)
+)
+
+-- Dragging
+local dragging = false
+local dragStart, startPos, dragInput
+
+header.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch
+        or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragInput = input
+        dragStart = input.Position
+        startPos = main.Position
+    end
+end)
+
+UIS.InputChanged:Connect(function(input)
+    if not alive or not dragging then return end
+    if input ~= dragInput
+        and input.UserInputType ~=
+            Enum.UserInputType.MouseMovement then
+        return
+    end
+
+    local delta = input.Position - dragStart
+    main.Position = UDim2.new(
+        startPos.X.Scale,
+        startPos.X.Offset + delta.X,
+        startPos.Y.Scale,
+        startPos.Y.Offset + delta.Y
+    )
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if input == dragInput
+        or input.UserInputType ==
+            Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+
+local rewardsButton = makeButton(
+    "AUTO REWARDS: OFF",
+    47, 38, Color3.fromRGB(150, 55, 60)
+)
+
+local giveawayButton = makeButton(
+    "AUTO GIVEAWAY: OFF",
+    91, 38, Color3.fromRGB(150, 55, 60)
+)
+
+local status = Instance.new("TextLabel")
+status.Size = UDim2.new(1, -20, 0, 65)
+status.Position = UDim2.fromOffset(10, 136)
+status.BackgroundTransparency = 1
+status.TextColor3 = Color3.new(1, 1, 1)
+status.Font = Enum.Font.Code
+status.TextSize = 12
+status.TextWrapped = true
+status.Parent = main
+
+local scanButton = makeButton(
+    "SCAN STATUS",
+    205, 32, Color3.fromRGB(55, 105, 175)
+)
+
+local copyButton = makeButton(
+    "COPY LOGS",
+    243, 32, Color3.fromRGB(35, 140, 90)
+)
+
+local closeButton = makeButton(
+    "STOP / CLOSE",
+    281, 35, Color3.fromRGB(145, 55, 60)
+)
+
+local function refresh()
+    if not alive then return end
+
+    rewardsButton.Text =
+        "AUTO REWARDS: " .. (rewardsON and "ON" or "OFF")
+    giveawayButton.Text =
+        "AUTO GIVEAWAY: " .. (giveawayON and "ON" or "OFF")
+
+    rewardsButton.BackgroundColor3 = rewardsON
+        and Color3.fromRGB(30, 145, 95)
+        or Color3.fromRGB(150, 55, 60)
+
+    giveawayButton.BackgroundColor3 = giveawayON
+        and Color3.fromRGB(30, 145, 95)
+        or Color3.fromRGB(150, 55, 60)
+
+    status.Text = string.format(
+        "Reward attempts: %d\n" ..
+        "Giveaway attempts: %d\n" ..
+        "Last: %s",
+        rewardAttempts,
+        giveawayAttempts,
+        lastMessage
+    )
+end
+
+local function scanStatus()
+    log("===== STATUS SCAN =====")
+
+    for i = 1, 3 do
+        local b = getRewardButton(i)
+
+        if b then
+            log("Reward " .. i .. " = " ..
+                (b:IsA("TextButton") and b.Text or "?") ..
+                " | visible=" .. tostring(isVisible(b)))
+        else
+            log("Reward " .. i .. " NOT FOUND")
+        end
+    end
+
+    local found = findGiveawayButtons()
+    log("Giveaway JOIN buttons found: " .. #found)
+
+    for _, b in ipairs(found) do
+        log("JOIN: " .. b:GetFullName())
+    end
+
+    local root = getRoot()
+    if root then
+        for _, obj in ipairs(root:GetDescendants()) do
+            if has(obj.Name, "GIVEAWAY")
+                or has(obj.Name, "NOTICE_JOIN") then
+                log("OBJECT: [" .. obj.ClassName .. "] " ..
+                    obj:GetFullName())
+            end
+        end
+    end
+
+    log("===== END SCAN =====")
+    refresh()
+end
+
+rewardsButton.Activated:Connect(function()
+    rewardsON = not rewardsON
+    log("Rewards " .. (rewardsON and "ON" or "OFF"))
+    refresh()
+end)
+
+giveawayButton.Activated:Connect(function()
+    giveawayON = not giveawayON
+    log("Giveaway " .. (giveawayON and "ON" or "OFF"))
+    refresh()
+end)
+
+scanButton.Activated:Connect(scanStatus)
+
+copyButton.Activated:Connect(function()
+    local fn = setclipboard or toclipboard
+
+    if type(fn) == "function" then
+        local ok = pcall(fn, table.concat(logs, "\n"))
+        copyButton.Text = ok and "COPIED!" or "COPY ERROR"
+    else
+        copyButton.Text = "NO CLIPBOARD"
+    end
+end)
+
+local function stop()
+    if not alive then return end
+    alive = false
+    rewardsON = false
+    giveawayON = false
+    gui:Destroy()
+end
+
+env.CaserV3Stop = stop
+closeButton.Activated:Connect(stop)
+
+task.spawn(function()
+    while alive do
+        if not busy then
+            busy = true
+
+            if rewardsON then
+                local ok, err = pcall(checkRewards)
+                if not ok then
+                    log("REWARDS ERROR: " .. tostring(err))
+                end
+            end
+
+            if giveawayON then
+                local ok, err = pcall(checkGiveaways)
+                if not ok then
+                    log("GIVEAWAY ERROR: " .. tostring(err))
+                end
+            end
+
+            busy = false
+        end
+
+        refresh()
+        task.wait(5)
+    end
+end)
+
+log("V3 started")
+refresh()
