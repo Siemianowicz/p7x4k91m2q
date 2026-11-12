@@ -1,0 +1,643 @@
+
+-- CASE PARADISE - AUTO TITAN TRADE
+-- FARM / STOCK automatic role
+-- Receiver: skybearice2018
+-- Limit: 50 Titans / rolling 60 minutes / farm account
+-- Batch: 10 Titans maximum
+--
+-- IMPORTANT:
+-- Trade remote names and arguments are NOT confirmed.
+-- This script will not blindly call unknown remotes.
+-- Configure TRADE_PROTOCOL after reading diagnostics.
+
+local Players = game:GetService("Players")
+local RS = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
+
+local LP = Players.LocalPlayer
+
+local CONFIG = {
+    STOCK_USERNAME = "skybearice2018",
+
+    HOURLY_LIMIT = 50,
+    BATCH_SIZE = 10,
+    CHECK_EVERY = 15,
+    TRADE_TIMEOUT = 45,
+    MAX_STOCK = 200,
+
+    -- Start with one Titan per trade for testing.
+    -- Change to 10 after confirming successful transfers.
+    TEST_MODE = true,
+
+    -- Only use confirmed remote names.
+    TRADE_PROTOCOL = {
+        SEND_REMOTE = "",
+        ACCEPT_REMOTE = "",
+
+        -- "player_items" -> (Player, Items)
+        -- "userid_items" -> (UserId, Items)
+        SEND_FORMAT = "player_items",
+
+        -- Accept signature must also be confirmed.
+        ACCEPT_FORMAT = "trade_id"
+    }
+}
+
+local STOCK = CONFIG.STOCK_USERNAME:lower()
+local IS_STOCK = LP.Name:lower() == STOCK
+local ROLE = IS_STOCK and "STOCK" or "FARM"
+
+-- Stop previous copy
+if getgenv().CP_AutoTitanTrade then
+    pcall(function()
+        getgenv().CP_AutoTitanTrade.Stop()
+    end)
+end
+
+local running = true
+local connections = {}
+local lastTrade = 0
+
+local ledgerPath =
+    "CP_TitanTrade_" .. tostring(LP.UserId) .. ".json"
+
+local function log(...)
+    print("[CP TRADE][" .. ROLE .. "]", ...)
+end
+
+local function addConnection(c)
+    table.insert(connections, c)
+    return c
+end
+
+local function findPlayer(name)
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.Name:lower() == name:lower() then
+            return player
+        end
+    end
+    return nil
+end
+
+local function playerData(player)
+    local localData = player:FindFirstChild("PlayerData")
+
+    if localData then
+        return localData
+    end
+
+    local shared = RS:FindFirstChild("PlayerData")
+
+    if shared then
+        return shared:FindFirstChild(player.Name)
+            or shared:FindFirstChild(tostring(player.UserId))
+    end
+
+    return nil
+end
+
+local function inventoryOf(player)
+    local pd = playerData(player)
+    if not pd then return nil end
+
+    return pd:FindFirstChild("Inventory")
+        or pd:FindFirstChild("Items")
+        or pd:FindFirstChild("Skins")
+end
+
+local Items = {}
+
+do
+    local modules = RS:FindFirstChild("Modules")
+    local itemModule = modules
+        and modules:FindFirstChild("Items")
+
+    if itemModule then
+        local ok, result = pcall(require, itemModule)
+
+        if ok and type(result) == "table" then
+            Items = result
+        end
+    end
+end
+
+local function resolveItem(name)
+    if Items[name] then
+        return name
+    end
+
+    local candidate = name
+
+    while candidate:match("%d$") do
+        candidate = candidate:sub(1, -2)
+
+        if Items[candidate] then
+            return candidate
+        end
+    end
+
+    return name
+end
+
+local function scanTitans(player)
+    local inv = inventoryOf(player)
+
+    if not inv then
+        return nil
+    end
+
+    local result = {}
+    local seen = {}
+
+    for _, item in ipairs(inv:GetDescendants()) do
+        if item:GetAttribute("UUID") ~= nil then
+            local id = resolveItem(item.Name)
+            local uuid = tostring(item:GetAttribute("UUID"))
+
+            if id:lower():find("titan", 1, true)
+                and not seen[uuid] then
+
+                seen[uuid] = true
+
+                local record = {
+                    Name = id,
+                    UUID = item:GetAttribute("UUID"),
+                    Wear = item:GetAttribute("Wear")
+                        or "Factory New",
+                    Stattrak = item:GetAttribute("Stattrak")
+                        or false,
+                    Age = item:GetAttribute("TimeObtained")
+                        or 0,
+                    Locked = item:GetAttribute("Locked")
+                        or false,
+                    Escrow = item:GetAttribute("Escrow")
+                        or false,
+                    JackpotEscrow =
+                        item:GetAttribute("JackpotEscrow")
+                        or false
+                }
+
+                table.insert(result, record)
+            end
+        end
+    end
+
+    return result
+end
+
+local function tradableTitans(player)
+    local all = scanTitans(player)
+    if not all then return nil end
+
+    local result = {}
+
+    for _, item in ipairs(all) do
+        if not item.Locked
+            and not item.Escrow
+            and not item.JackpotEscrow then
+
+            table.insert(result, {
+                Name = item.Name,
+                UUID = item.UUID,
+                Wear = item.Wear,
+                Stattrak = item.Stattrak,
+                Age = item.Age
+            })
+        end
+    end
+
+    return result
+end
+
+-- Persistent hourly ledger
+
+local ledger = {}
+
+local function loadLedger()
+    if not (isfile and readfile) then
+        return
+    end
+
+    if not isfile(ledgerPath) then
+        return
+    end
+
+    local ok, data = pcall(function()
+        return HttpService:JSONDecode(
+            readfile(ledgerPath)
+        )
+    end)
+
+    if ok and type(data) == "table" then
+        ledger = data
+    end
+end
+
+local function saveLedger()
+    if not writefile then return end
+
+    pcall(function()
+        writefile(
+            ledgerPath,
+            HttpService:JSONEncode(ledger)
+        )
+    end)
+end
+
+local function hourlySent()
+    local now = os.time()
+    local valid = {}
+    local total = 0
+
+    for _, entry in ipairs(ledger) do
+        if type(entry) == "table"
+            and tonumber(entry.time)
+            and tonumber(entry.count) then
+
+            if now - entry.time < 3600
+                and entry.time <= now then
+
+                table.insert(valid, entry)
+                total = total + entry.count
+            end
+        end
+    end
+
+    ledger = valid
+    saveLedger()
+
+    return total
+end
+
+local function recordConfirmed(n)
+    table.insert(ledger, {
+        time = os.time(),
+        count = n
+    })
+
+    saveLedger()
+
+    log(
+        "Confirmed:",
+        n,
+        "Hourly:",
+        hourlySent(),
+        "/",
+        CONFIG.HOURLY_LIMIT
+    )
+end
+
+loadLedger()
+
+-- Remote discovery
+
+local remotesFolder = RS:FindFirstChild("Remotes")
+
+local function findRemote(name)
+    if not remotesFolder or name == "" then
+        return nil
+    end
+
+    return remotesFolder:FindFirstChild(
+        name, true
+    )
+end
+
+local function showTradeRemotes()
+    log("Looking for trade remotes...")
+
+    if not remotesFolder then
+        warn("[CP TRADE] Remotes folder missing")
+        return
+    end
+
+    local count = 0
+
+    for _, remote in ipairs(
+        remotesFolder:GetDescendants()
+    ) do
+        if remote:IsA("RemoteEvent")
+            or remote:IsA("RemoteFunction") then
+
+            local name = remote.Name:lower()
+
+            if name:find("trade")
+                or name:find("offer")
+                or name:find("accept")
+                or name:find("gift") then
+
+                count = count + 1
+
+                log(
+                    "REMOTE:",
+                    remote.Name,
+                    remote.ClassName,
+                    remote:GetFullName()
+                )
+            end
+        end
+    end
+
+    log("Candidate remotes:", count)
+end
+
+showTradeRemotes()
+
+local function invokeRemote(remote, ...)
+    if not remote then
+        return false, "Remote missing"
+    end
+
+    if remote:IsA("RemoteFunction") then
+        return pcall(function(...)
+            return remote:InvokeServer(...)
+        end, ...)
+    end
+
+    if remote:IsA("RemoteEvent") then
+        local ok, err = pcall(function(...)
+            remote:FireServer(...)
+        end, ...)
+
+        -- FireServer success does NOT confirm a trade.
+        return ok, ok and "sent_unconfirmed" or err
+    end
+
+    return false, "Unsupported remote"
+end
+
+local function requestTrade(target, items)
+    local protocol = CONFIG.TRADE_PROTOCOL
+
+    local remote = findRemote(
+        protocol.SEND_REMOTE
+    )
+
+    if not remote then
+        return false, "SEND_REMOTE not configured"
+    end
+
+    if protocol.SEND_FORMAT == "player_items" then
+        return invokeRemote(remote, target, items)
+
+    elseif protocol.SEND_FORMAT == "userid_items" then
+        return invokeRemote(
+            remote,
+            target.UserId,
+            items
+        )
+    end
+
+    return false, "Unknown SEND_FORMAT"
+end
+
+local function waitForTransfer(uuids, before, target)
+    local started = os.clock()
+
+    while running
+        and os.clock() - started
+            < CONFIG.TRADE_TIMEOUT do
+
+        task.wait(1)
+
+        local current = scanTitans(LP)
+
+        if current then
+            local remaining = {}
+
+            for _, item in ipairs(current) do
+                remaining[tostring(item.UUID)] = true
+            end
+
+            local disappeared = 0
+
+            for uuid in pairs(uuids) do
+                if not remaining[uuid] then
+                    disappeared = disappeared + 1
+                end
+            end
+
+            if disappeared > 0 then
+                -- Inventory disappearance alone is not
+                -- sufficient proof of successful trade.
+                -- Check receiver inventory when replicated.
+                local receiverItems = scanTitans(target)
+
+                if receiverItems then
+                    local received = {}
+
+                    for _, item in ipairs(receiverItems) do
+                        received[tostring(item.UUID)] = true
+                    end
+
+                    local verified = 0
+
+                    for uuid in pairs(uuids) do
+                        if not remaining[uuid]
+                            and received[uuid]
+                            and not before[uuid] then
+                            verified = verified + 1
+                        end
+                    end
+
+                    if verified > 0 then
+                        return verified
+                    end
+                end
+            end
+        end
+    end
+
+    return 0
+end
+
+local function farmStep()
+    local receiver = findPlayer(
+        CONFIG.STOCK_USERNAME
+    )
+
+    if not receiver then
+        log("STOCK not on this server")
+        return
+    end
+
+    local own = tradableTitans(LP)
+
+    if not own then
+        log("Own inventory unavailable")
+        return
+    end
+
+    if #own == 0 then
+        log("No Titans to send")
+        return
+    end
+
+    local receiverItems = scanTitans(receiver)
+
+    if receiverItems then
+        if #receiverItems >= CONFIG.MAX_STOCK then
+            log("STOCK inventory full")
+            return
+        end
+    end
+
+    local sent = hourlySent()
+
+    if sent >= CONFIG.HOURLY_LIMIT then
+        log("Hourly limit reached")
+        return
+    end
+
+    local batchLimit = CONFIG.TEST_MODE
+        and 1 or CONFIG.BATCH_SIZE
+
+    local amount = math.min(
+        batchLimit,
+        CONFIG.HOURLY_LIMIT - sent,
+        #own
+    )
+
+    if receiverItems then
+        amount = math.min(
+            amount,
+            CONFIG.MAX_STOCK - #receiverItems
+        )
+    end
+
+    if amount <= 0 then return end
+
+    local batch = {}
+    local selected = {}
+    local before = {}
+
+    if receiverItems then
+        for _, item in ipairs(receiverItems) do
+            before[tostring(item.UUID)] = true
+        end
+    end
+
+    for i = 1, amount do
+        local item = own[i]
+
+        table.insert(batch, item)
+        selected[tostring(item.UUID)] = true
+    end
+
+    log(
+        "Preparing",
+        amount,
+        "Titans for",
+        receiver.Name
+    )
+
+    local ok, response = requestTrade(
+        receiver, batch
+    )
+
+    if not ok then
+        log("Trade not started:", response)
+        return
+    end
+
+    log("Trade request submitted")
+
+    if not receiverItems then
+        log(
+            "Receiver inventory unavailable;",
+            "cannot confirm transfer"
+        )
+        return
+    end
+
+    local confirmed = waitForTransfer(
+        selected,
+        before,
+        receiver
+    )
+
+    if confirmed > 0 then
+        recordConfirmed(confirmed)
+    else
+        log(
+            "Transfer unconfirmed.",
+            "No Titans added to hourly ledger."
+        )
+    end
+end
+
+-- Stock mode: observe incoming trades
+-- Acceptance is disabled until the game's exact
+-- acceptance protocol has been verified.
+
+local function stockStep()
+    local titans = scanTitans(LP)
+
+    if titans then
+        log(
+            "STOCK TITANS:",
+            #titans,
+            "/",
+            CONFIG.MAX_STOCK
+        )
+    else
+        log("STOCK inventory unavailable")
+    end
+
+    local acceptRemote = findRemote(
+        CONFIG.TRADE_PROTOCOL.ACCEPT_REMOTE
+    )
+
+    if not acceptRemote then
+        log(
+            "Automatic acceptance awaiting",
+            "confirmed ACCEPT_REMOTE"
+        )
+    end
+end
+
+local function stop()
+    running = false
+
+    for _, conn in ipairs(connections) do
+        pcall(function()
+            conn:Disconnect()
+        end)
+    end
+
+    log("Stopped")
+end
+
+getgenv().CP_AutoTitanTrade = {
+    Stop = stop,
+    Role = ROLE,
+    Stock = CONFIG.STOCK_USERNAME,
+    ShowRemotes = showTradeRemotes
+}
+
+log("================================")
+log("AUTO TITAN TRADE")
+log("Account:", LP.Name)
+log("Role:", ROLE)
+log("Receiver:", CONFIG.STOCK_USERNAME)
+log("Limit:", CONFIG.HOURLY_LIMIT, "/ hour")
+log("Test mode:", CONFIG.TEST_MODE)
+log("================================")
+
+task.spawn(function()
+    while running do
+        local ok, err = pcall(function()
+            if IS_STOCK then
+                stockStep()
+            else
+                farmStep()
+            end
+        end)
+
+        if not ok then
+            warn("[CP TRADE] ERROR:", err)
+        end
+
+        task.wait(CONFIG.CHECK_EVERY)
+    end
+end)
