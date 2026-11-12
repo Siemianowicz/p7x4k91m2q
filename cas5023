@@ -163,23 +163,31 @@ local function giveawayContext(button)
     return has(button.Name, "GIVEAWAY")
 end
 
+
+-- GIVEAWAY BACKGROUND DETECTION
+-- Nie wymaga widocznej zakladki Giveaway
+
 local function findGiveawayButtons()
     local root = getRoot()
     local found = {}
-    if not root then return found end
+
+    if not root then
+        return found
+    end
 
     for _, obj in ipairs(root:GetDescendants()) do
-        if obj:IsA("TextButton")
-            and isVisible(obj)
-            and obj.Interactable then
-
+        if obj:IsA("TextButton") then
             local label = upper(obj.Text)
 
             if label == "JOIN GIVEAWAY"
                 or label == "JOIN"
                 or label == "ENTER GIVEAWAY" then
 
-                table.insert(found, obj)
+                -- Nie sprawdzamy Visible ani isVisible.
+                -- Wykrywamy rowniez ukryte przyciski.
+                if obj.Interactable then
+                    table.insert(found, obj)
+                end
             end
         end
     end
