@@ -1,165 +1,54 @@
 
--- PLAYTIME REWARDS DEBUG SCANNER
--- Niczego nie odbiera ani nie klika
+-- TEST CLAIM REWARD 1
+-- Delta Executor
 
 local Players = game:GetService("Players")
-local player = Players.LocalPlayer
-local pg = player:WaitForChild("PlayerGui")
+local pg = Players.LocalPlayer:WaitForChild("PlayerGui")
 
-local old = pg:FindFirstChild("PlaytimeDebugGUI")
-if old then old:Destroy() end
+local button = pg
+    :WaitForChild("CaserUpgrader")
+    :WaitForChild("Frame")
+    :WaitForChild("ScrollingFrame")
+    :WaitForChild("Frame")
+    :WaitForChild("Playtime1")
+    :WaitForChild("PlayClaim1")
 
-local lines = {}
+print("[TEST] Button:", button.Text)
 
-local function add(s)
-    table.insert(lines, tostring(s))
+if button.Text ~= "CLAIM SKIN" then
+    warn("[TEST] Reward not ready")
+    return
 end
 
-local function describe(obj)
-    if not obj then
-        add("OBJECT NOT FOUND")
-        return
-    end
-
-    add("Path: " .. obj:GetFullName())
-    add("Class: " .. obj.ClassName)
-
-    if obj:IsA("GuiObject") then
-        add("Visible: " .. tostring(obj.Visible))
-        add("Active: " .. tostring(obj.Active))
-        add("Position: " .. tostring(obj.Position))
-        add("Size: " .. tostring(obj.Size))
-        add("AbsoluteSize: " .. tostring(obj.AbsoluteSize))
-    end
-
-    if obj:IsA("GuiButton") then
-        add("Interactable: " .. tostring(obj.Interactable))
-        add("Selectable: " .. tostring(obj.Selectable))
-    end
-
-    if obj:IsA("TextButton")
-        or obj:IsA("TextLabel") then
-        add("Text: " .. obj.Text)
-    end
-
-    for _, child in ipairs(obj:GetChildren()) do
-        add("  Child: " .. child.Name ..
-            " [" .. child.ClassName .. "]")
-
-        if child:IsA("TextLabel")
-            or child:IsA("TextButton") then
-            add("    Text: " .. child.Text)
-        end
-    end
+if type(getconnections) ~= "function" then
+    warn("[TEST] getconnections unavailable")
+    return
 end
 
-local function scan()
-    table.clear(lines)
-    add("=== PLAYTIME DEBUG ===")
-    add("PlaceId: " .. game.PlaceId)
-
-    local root = pg:FindFirstChild("CaserUpgrader")
-
-    if not root then
-        add("CaserUpgrader NOT FOUND")
-        return
-    end
-
-    for i = 1, 3 do
-        add("")
-        add("===== REWARD " .. i .. " =====")
-
-        local found = false
-
-        for _, obj in ipairs(root:GetDescendants()) do
-            if obj.Name == "PlayClaim" .. i then
-                found = true
-                describe(obj)
-                add("--- PARENT ---")
-                describe(obj.Parent)
-            end
-        end
-
-        if not found then
-            add("BUTTON NOT FOUND")
-        end
-    end
-end
-
-scan()
-
-local gui = Instance.new("ScreenGui")
-gui.Name = "PlaytimeDebugGUI"
-gui.ResetOnSpawn = false
-gui.Parent = pg
-
-local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0.85, 0, 0.65, 0)
-frame.Position = UDim2.new(0.075, 0, 0.17, 0)
-frame.BackgroundColor3 = Color3.fromRGB(25, 28, 36)
-frame.Active = true
-frame.Draggable = true
-frame.Parent = gui
-
-Instance.new("UICorner", frame).CornerRadius =
-    UDim.new(0, 10)
-
-local output = Instance.new("TextBox")
-output.Size = UDim2.new(1, -20, 1, -110)
-output.Position = UDim2.fromOffset(10, 10)
-output.BackgroundColor3 = Color3.fromRGB(35, 38, 48)
-output.TextColor3 = Color3.new(1, 1, 1)
-output.Font = Enum.Font.Code
-output.TextSize = 12
-output.MultiLine = true
-output.TextWrapped = false
-output.TextXAlignment = Enum.TextXAlignment.Left
-output.TextYAlignment = Enum.TextYAlignment.Top
-output.ClearTextOnFocus = false
-output.TextEditable = true
-output.Text = table.concat(lines, "\n")
-output.Parent = frame
-
-local function button(text, x, width, color)
-    local b = Instance.new("TextButton")
-    b.Size = UDim2.new(width, -10, 0, 40)
-    b.Position = UDim2.new(x, 5, 1, -50)
-    b.BackgroundColor3 = color
-    b.TextColor3 = Color3.new(1, 1, 1)
-    b.Text = text
-    b.TextSize = 13
-    b.Parent = frame
-    return b
-end
-
-local refresh = button(
-    "REFRESH", 0, 0.33,
-    Color3.fromRGB(50, 100, 170)
-)
-
-local copy = button(
-    "COPY LOGS", 0.33, 0.34,
-    Color3.fromRGB(35, 140, 85)
-)
-
-local close = button(
-    "CLOSE", 0.67, 0.33,
-    Color3.fromRGB(160, 55, 55)
-)
-
-refresh.MouseButton1Click:Connect(function()
-    scan()
-    output.Text = table.concat(lines, "\n")
+local ok, connections = pcall(function()
+    return getconnections(button.MouseButton1Click)
 end)
 
-copy.MouseButton1Click:Connect(function()
-    local fn = setclipboard or toclipboard
-    if fn then
-        fn(output.Text)
-        copy.Text = "COPIED!"
-    end
-end)
+if not ok then
+    warn("[TEST] Cannot inspect connections")
+    return
+end
 
-close.MouseButton1Click:Connect(function()
-    gui:Destroy()
-end)
+print("[TEST] Connections:", #connections)
+
+local fired = 0
+
+for _, connection in ipairs(connections) do
+    local success, err = pcall(function()
+        connection:Fire()
+    end)
+
+    if success then
+        fired += 1
+        print("[TEST] Fired connection")
+    else
+        warn("[TEST] Error:", err)
+    end
+end
+
+print("[TEST] Fired:", fired)
