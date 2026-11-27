@@ -112,6 +112,9 @@ getgenv().OkiKaitun = {
     SellAtRyo        = 500,     -- sack worth 500 ryo: sell, then reset back to East
     RespawnWanted    = true,    -- reset after the sale even while Wanted (-50 ryo, clears the bounty)
 
+    AntiAfk      = true,        -- never get the 20-minute idle kick
+    AimCamera    = true,        -- face a loot prompt the game is not showing, so the item hold fires
+
     ---------------------------------------------------------------- ESP
     ESP = {
         Containers = true,      -- chests, cabinets, carriages, sacks — colour per kind
@@ -121,11 +124,12 @@ getgenv().OkiKaitun = {
         Distance   = true,      -- stud count under each label
         MaxStuds   = 1200,      -- nothing drawn past this
         Looted     = false,     -- keep emptied containers on screen, dimmed
+        HighlightStuds = 300,   -- glow only the containers this close (the engine draws ~31 at once)
     },
 
     ---------------------------------------------------------------- performance
     FPS          = 30,          -- cap: 30 keeps steering/dash smooth with 3D off, half the CPU of uncapped (0 = no cap)
-    BlackScreen  = true,        -- black overlay with live stats + 3D rendering off (saves GPU)
+    BlackScreen  = false,        -- black overlay with live stats + 3D rendering off (saves GPU)
     OverlayKey   = "RightControl", -- show / hide the overlay (taken away from the game's own Lock while the farm runs)
     GoalRyo      = 15000,       -- the overlay's "today" goal bar
     MuteSounds   = false,
@@ -201,6 +205,8 @@ SpawnLockWait = opt(CFG.SpawnLockWait, 600),
 SellAtRyo = opt(CFG.SellAtRyo, 500),
 RespawnWanted = opt(CFG.RespawnWanted, true),
 ESP = opt(CFG.ESP, {}),
+AntiAfk = opt(CFG.AntiAfk, true),
+AimCamera = opt(CFG.AimCamera, true),
 FPS = opt(CFG.FPS, 0),
 BlackScreen = opt(CFG.BlackScreen, true),
 OverlayKey = opt(CFG.OverlayKey, "RightControl"),
@@ -227,6 +233,7 @@ Npcs = opt(C.ESP.Npcs, false),
 Distance = opt(C.ESP.Distance, true),
 MaxStuds = opt(C.ESP.MaxStuds, 1200),
 Looted = opt(C.ESP.Looted, false),
+HighlightStuds = opt(C.ESP.HighlightStuds, 300),
 }
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -239,24 +246,6 @@ local Lighting = game:GetService("Lighting")
 local SoundService = game:GetService("SoundService")
 local TeleportService = game:GetService("TeleportService")
 local LocalPlayer = Players.LocalPlayer
--- Anti-AFK
-local function startAntiAFK()
-    local env = getgenv()
-    if env.OkiAntiAFKConnection then
-        pcall(function()
-            env.OkiAntiAFKConnection:Disconnect()
-        end)
-    end
-
-    local VirtualUser = game:GetService("VirtualUser")
-
-    env.OkiAntiAFKConnection = LocalPlayer.Idled:Connect(function()
-        pcall(function()
-            VirtualUser:CaptureController()
-            VirtualUser:ClickButton2(Vector2.new(0, 0))
-        end)
-    end)
-end
 local Camera = workspace.CurrentCamera
 local MenuRequest = ReplicatedStorage:WaitForChild("Menu"):WaitForChild("Request")
 local HorseRide = ReplicatedStorage:FindFirstChild("Horse")
@@ -2036,6 +2025,25 @@ S.shownPrompts[p] = true
 end)
 c2 = PPS.PromptHidden:Connect(function(p) S.shownPrompts[p] = nil end)
 end
+function S.aimAt(prompt)
+if C.AimCamera == false then return false end
+local cam, hrp, pos = workspace.CurrentCamera, root(), promptWorldPos(prompt, nil)
+if not (cam and hrp and pos) then return false end
+local dir = pos - hrp.Position
+if dir.Magnitude < 0.1 then return false end
+dir = dir.Unit
+local ok = pcall(function()
+if S.camType == nil then S.camType = cam.CameraType end
+cam.CameraType = Enum.CameraType.Scriptable
+cam.CFrame = CFrame.lookAt(hrp.Position + Vector3.new(0, 2.5, 0) - dir * 5, pos)
+end)
+return ok
+end
+function S.aimDone()
+local cam = workspace.CurrentCamera
+if cam and S.camType ~= nil then pcall(function() cam.CameraType = S.camType end) end
+S.camType = nil
+end
 local function holdOnce(prompt)
 local hold = prompt.HoldDuration
 if not hold or hold <= 0 then hold = 0.35 end
@@ -2046,6 +2054,14 @@ prompt.RequiresLineOfSight = false
 end)
 task.wait()
 end
+local aimed = false
+if not S.shownPrompts[prompt] then
+aimed = S.aimAt(prompt)
+if aimed then
+local ta = os.clock()
+while not S.shownPrompts[prompt] and os.clock() - ta < 0.3 do task.wait() end
+end
+end
 local fired = false
 local conn = prompt.Triggered:Connect(function() fired = true end)
 local t0 = os.clock()
@@ -2053,6 +2069,7 @@ pcall(function() prompt:InputHoldBegin() end)
 while not fired and os.clock() - t0 < hold + 0.15 do task.wait() end
 pcall(function() prompt:InputHoldEnd() end)
 conn:Disconnect()
+if aimed then S.aimDone() end
 return os.clock(), fired
 end
 S.holdOnce = holdOnce
@@ -3426,6 +3443,7 @@ local colour = ESP_COLOURS[emptied and "Looted" or kind]
 entry.label.TextColor3 = colour
 entry.hl.FillColor = colour
 entry.hl.OutlineColor = colour
+entry.hl.Enabled = d <= C.ESP.HighlightStuds
 end
 end
 end
@@ -4689,10 +4707,39 @@ log("warn", "did not spawn in time, going round again")
 end
 return false
 end
+function S.antiAfk()
+if C.AntiAfk == false then return end
+local G = getgenv()
+if G.OkiIdleConn then pcall(function() G.OkiIdleConn:Disconnect() end) G.OkiIdleConn = nil end
+local VU = game:GetService("VirtualUser")
+local function poke(why)
+if not alive() then return end
+local ok = pcall(function()
+VU:CaptureController()
+VU:ClickButton2(Vector2.new(0, 0))
+end)
+S.afkPokes = (S.afkPokes or 0) + 1
+if S.afkPokes <= 2 or why == "idled" then
+log("info", ("anti-AFK: %s (%s), poke %d"):format(ok and "input sent" or "VirtualUser failed", why, S.afkPokes))
+end
+end
+G.OkiIdleConn = LocalPlayer.Idled:Connect(function() poke("idled") end)
+task.spawn(function()
+while alive() do
+task.wait(240)
+poke("timer")
+end
+if G.OkiIdleConn then pcall(function() G.OkiIdleConn:Disconnect() end) G.OkiIdleConn = nil end
+end)
+end
 local function boot()
 log("info", ("CometOkishima Kaitun · session %d · %s"):format(SESSION, LocalPlayer.Name))
 applyPerformance()
 startESP()
+S.antiAfk()
+if S.overlayShown and (C.ESP.Containers or C.ESP.Smugglers or C.ESP.Players) then
+log("warn", "ESP is on but BlackScreen hides the game: press the overlay key (or set BlackScreen = false) to see it")
+end
 if not C.Start then
 log("info", "Start = false: loaded, nothing armed")
 getgenv().OkiKaitunAPI = {
@@ -4705,7 +4752,6 @@ config = C,
 }
 return
 end
-startAntiAFK()
 watchDeath()
 watchWanted()
 task.spawn(function()
