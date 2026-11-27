@@ -239,6 +239,24 @@ local Lighting = game:GetService("Lighting")
 local SoundService = game:GetService("SoundService")
 local TeleportService = game:GetService("TeleportService")
 local LocalPlayer = Players.LocalPlayer
+-- Anti-AFK
+local function startAntiAFK()
+    local env = getgenv()
+    if env.OkiAntiAFKConnection then
+        pcall(function()
+            env.OkiAntiAFKConnection:Disconnect()
+        end)
+    end
+
+    local VirtualUser = game:GetService("VirtualUser")
+
+    env.OkiAntiAFKConnection = LocalPlayer.Idled:Connect(function()
+        pcall(function()
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new(0, 0))
+        end)
+    end)
+end
 local Camera = workspace.CurrentCamera
 local MenuRequest = ReplicatedStorage:WaitForChild("Menu"):WaitForChild("Request")
 local HorseRide = ReplicatedStorage:FindFirstChild("Horse")
@@ -4687,6 +4705,7 @@ config = C,
 }
 return
 end
+startAntiAFK()
 watchDeath()
 watchWanted()
 task.spawn(function()
